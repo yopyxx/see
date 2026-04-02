@@ -1,7 +1,3 @@
-// index.js
-// npm i discord.js
-// Node.js 18+ 권장
-
 const {
   Client,
   GatewayIntentBits,
@@ -12,17 +8,18 @@ const {
   ChannelType
 } = require('discord.js');
 
-const TOKEN = '여기에_봇_토큰';
-const CLIENT_ID = '여기에_봇_클라이언트_ID';
-const GUILD_ID = '여기에_서버_ID';
+const TOKEN = (process.env.TOKEN || '').trim();
+const CLIENT_ID = (process.env.CLIENT_ID || '').trim();
+const GUILD_ID = (process.env.GUILD_ID || '').trim();
+
+if (!TOKEN) throw new Error('TOKEN 환경변수가 비어 있습니다.');
+if (!CLIENT_ID) throw new Error('CLIENT_ID 환경변수가 비어 있습니다.');
+if (!GUILD_ID) throw new Error('GUILD_ID 환경변수가 비어 있습니다.');
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
-// -------------------------
-// 슬래시 명령어 등록
-// -------------------------
 const commands = [
   new SlashCommandBuilder()
     .setName('추가')
@@ -34,7 +31,8 @@ const commands = [
         .setRequired(true)
     )
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-].map(cmd => cmd.toJSON());
+    .toJSON()
+];
 
 async function registerCommands() {
   const rest = new REST({ version: '10' }).setToken(TOKEN);
@@ -51,31 +49,16 @@ async function registerCommands() {
   }
 }
 
-// -------------------------
-// 비공개 채널 판별
-// @everyone가 ViewChannel = false 이면 비공개로 간주
-// -------------------------
 function isPrivateChannel(channel, everyoneRoleId) {
   const overwrite = channel.permissionOverwrites.cache.get(everyoneRoleId);
   if (!overwrite) return false;
-
   return overwrite.deny.has(PermissionFlagsBits.ViewChannel);
 }
 
-// -------------------------
-// 역할 ID 문자열 파싱
-// 예: "123,456,789"
-// -------------------------
 function parseRoleIds(input) {
-  return input
-    .split(',')
-    .map(v => v.trim())
-    .filter(Boolean);
+  return input.split(',').map(v => v.trim()).filter(Boolean);
 }
 
-// -------------------------
-// 메인
-// -------------------------
 client.once('ready', () => {
   console.log(`${client.user.tag} 로그인 완료`);
 });
@@ -95,7 +78,7 @@ client.on('interactionCreate', async interaction => {
     const input = interaction.options.getString('역할id', true);
     const roleIds = parseRoleIds(input);
 
-    if (roleIds.length === 0) {
+    if (!roleIds.length) {
       return interaction.editReply('역할 ID를 올바르게 입력해주세요.');
     }
 
@@ -110,10 +93,8 @@ client.on('interactionCreate', async interaction => {
       else validRoles.push(role);
     }
 
-    if (validRoles.length === 0) {
-      return interaction.editReply(
-        `유효한 역할을 찾지 못했습니다.\n잘못된 역할 ID: ${invalidRoleIds.join(', ')}`
-      );
+    if (!validRoles.length) {
+      return interaction.editReply(`유효한 역할이 없습니다.\n잘못된 역할 ID: ${invalidRoleIds.join(', ')}`);
     }
 
     const allChannels = guild.channels.cache.filter(ch =>
@@ -124,17 +105,10 @@ client.on('interactionCreate', async interaction => {
         ChannelType.GuildVoice,
         ChannelType.GuildStageVoice,
         ChannelType.GuildForum,
-        ChannelType.GuildMedia
       ].includes(ch.type)
     );
 
-    const privateChannels = allChannels.filter(channel =>
-      isPrivateChannel(channel, everyoneRoleId)
-    );
-
-    if (privateChannels.size === 0) {
-      return interaction.editReply('비공개 카테고리/채널을 찾지 못했습니다.');
-    }
+    const privateChannels = allChannels.filter(ch => isPrivateChannel(ch, everyoneRoleId));
 
     let updatedCount = 0;
     const failedChannels = [];
@@ -148,25 +122,20 @@ client.on('interactionCreate', async interaction => {
           });
         }
         updatedCount++;
-      } catch (err) {
-        console.error(`권한 수정 실패: ${channel.name} (${channel.id})`, err);
+      } catch (e) {
         failedChannels.push(`${channel.name} (${channel.id})`);
       }
     }
 
-    let result = `완료되었습니다.\n`;
-    result += `대상 역할: ${validRoles.map(r => `${r.name}(${r.id})`).join(', ')}\n`;
-    result += `처리된 비공개 카테고리/채널 수: ${updatedCount}개`;
-
-    if (invalidRoleIds.length > 0) {
-      result += `\n\n잘못된 역할 ID:\n${invalidRoleIds.join(', ')}`;
+    let msg = `완료되었습니다.\n처리된 비공개 채널/카테고리: ${updatedCount}개`;
+    if (invalidRoleIds.length) {
+      msg += `\n잘못된 역할 ID: ${invalidRoleIds.join(', ')}`;
+    }
+    if (failedChannels.length) {
+      msg += `\n처리 실패:\n${failedChannels.join('\n')}`;
     }
 
-    if (failedChannels.length > 0) {
-      result += `\n\n처리 실패 채널:\n${failedChannels.join('\n')}`;
-    }
-
-    await interaction.editReply(result);
+    await interaction.editReply(msg);
   } catch (err) {
     console.error(err);
     await interaction.editReply('오류가 발생했습니다.');
